@@ -1,0 +1,121 @@
+#version 430
+#extension GL_KHR_vulkan_glsl : enable
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_EXT_debug_printf : enable
+
+#include "acceptbools.glsl"
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(rgba16f, binding = 0) uniform readonly image2D FilteredInput;
+layout(rgba16f, binding = 1) uniform image2DArray AccumulatedColor;
+
+layout(rg16f, binding = 2) uniform readonly image2D GbufferMotionVec;
+
+layout(r8ui, binding = 3) uniform readonly uimage2D AcceptBools; // For bilinear kernel, set bits # 0...3 for accept values
+
+layout(push_constant) uniform push_constant_t
+{
+    // Read array index
+    uint ReadIdx;
+    // Write array index
+    uint WriteIdx;
+    // Combined Weight Threshhold (Default 0.01)
+    float WeightThreshhold;
+    // Minimum weight assigned to new data
+    float MinNewDataWeight;
+    uint EnableHistory;
+    uint DebugMode;
+} PushC;
+
+void main()
+{
+    ivec2 currTexel = ivec2(gl_GlobalInvocationID.xy);
+
+    ivec2 renderSize = imageSize(GbufferMotionVec);
+
+    vec2 motionVec = imageLoad(GbufferMotionVec, currTexel).xy;
+
+    vec2 prevTexel = currTexel + motionVec * imageSize(FilteredInput).xy;
+    
+    vec2 prevPosSubPixel = fract(prevTexel);
+
+    vec3 currColor = imageLoad(FilteredInput, currTexel).rgb;
+
+    uint acceptBools = imageLoad(AcceptBools, currTexel).r;
+
+    vec3 prevColor = vec3(0);
+    float historyLength = 0.f;
+    float summedWeight = 0.f;
+
+    if (PushC.EnableHistory > 0)
+    { // Read history data w/ bilinear interpolation
+    	for(int y = 0; y <= 1; y++) {
+    		for(int x = 0; x <= 1; x++) {
+                // current position
+    			ivec2 samplePos    = ivec2(prevTexel + ivec2(x, y));
+
+                bool accept = readAcceptBool(acceptBools, ivec2(x, y));
+
+    			if(accept) {
+    				float weight = (x == 0 ? (1.0 - prevPosSubPixel.x) : prevPosSubPixel.x)
+    					    * (y == 0 ? (1.0 - prevPosSubPixel.y) : prevPosSubPixel.y); // bilinear weight
+
+                    vec4 colorAndHistoryLength = imageLoad(AccumulatedColor, ivec3(samplePos, PushC.ReadIdx)) * weight;
+                    // Accumulate Color
+    				prevColor   += colorAndHistoryLength.rgb;
+                    // Accumulate History
+    				historyLength += colorAndHistoryLength.a;
+                    // Accumulate Weights
+    				summedWeight += weight;
+    			}
+    		}
+        }
+    }
+
+
+    if (summedWeight > PushC.WeightThreshhold)
+    {
+        // Alpha values: [0...1], where 0 == only history data, 1 == only new data
+        // Calculate mean for Colors
+        prevColor /= summedWeight;
+        // Calculate mean for History
+        historyLength /= summedWeight;
+        
+        // Temporal accumulation factor a alpha for drop stale history information
+
+        float rawHistoryAlpha = 1.f / (historyLength + 1.f);
+        float colorAlpha = max(PushC.MinNewDataWeight, rawHistoryAlpha);
+
+        // Mix everything together and store the images
+
+        vec4 accuColorPlusHistlen = vec4(mix(prevColor, currColor, colorAlpha), min(64, historyLength + 1.f));
+        imageStore(AccumulatedColor, ivec3(currTexel, PushC.WriteIdx), accuColorPlusHistlen);
+
+        // if (PushC.DebugMode == DEBUG_TEMPACCU_OUTPUT)
+        // {
+        //     imageStore(DebugOutput, currTexel, vec4(mix(prevColor, currColor, colorAlpha), 1.f));
+        // }
+        // if (PushC.DebugMode == DEBUG_TEMPACCU_ALPHA)
+        // {
+        //     imageStore(DebugOutput, currTexel, vec4(colorAlpha, momentsAlpha, 0.f, 1.f));
+        // }
+    }
+    // If weight is to small dont mix the colors
+    else
+    {
+        imageStore(AccumulatedColor, ivec3(currTexel, PushC.WriteIdx), vec4(currColor, 1.f));
+        // if (PushC.DebugMode == DEBUG_TEMPACCU_OUTPUT)
+        // {
+        //     imageStore(DebugOutput, currTexel, vec4(currColor, 1.f));
+        // }
+        // if (PushC.DebugMode == DEBUG_TEMPACCU_ALPHA)
+        // {
+        //     imageStore(DebugOutput, currTexel, vec4(0.f, 0.f, 0.f, 1.f));
+        // }
+    }
+    // if (PushC.DebugMode == DEBUG_TEMPACCU_WEIGHTS)
+    // {
+    //     imageStore(DebugOutput, currTexel, vec4(summedWeight / 10, 0, 0, 1));
+    // }
+}
