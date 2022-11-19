@@ -12,8 +12,8 @@ namespace foray::bmfr
 
     void PreProcessStage::ApiInitShader()
     {
-        mShader.LoadFromSource(mContext, SHADER_DIR "/preprocess.comp");
-        mShaderSourcePaths.push_back(SHADER_DIR "/preprocess.comp");
+        mShader.LoadFromSource(mContext, BMFR_SHADER_DIR "/preprocess.comp");
+        mShaderSourcePaths.push_back(BMFR_SHADER_DIR "/preprocess.comp");
     }
     void PreProcessStage::ApiCreateDescriptorSet()
     {
@@ -22,7 +22,7 @@ namespace foray::bmfr
     void PreProcessStage::UpdateDescriptorSet()
     {
         std::vector<core::ManagedImage*> images({mBmfrStage->mInputs.Primary, mBmfrStage->mInputs.Position, &mBmfrStage->mHistory.Position.GetHistoryImage(), mBmfrStage->mInputs.Normal,
-                                                 &mBmfrStage->mHistory.Normal.GetHistoryImage(), mBmfrStage->mInputs.Motion, &mBmfrStage->mAccuImages.Input, &mBmfrStage->mAccuImages.AcceptBools});
+                                                 &mBmfrStage->mHistory.Normal.GetHistoryImage(), mBmfrStage->mInputs.Motion, &mBmfrStage->mAccuImages.Input, &mBmfrStage->mAccuImages.AcceptBools, mBmfrStage->mPrimaryOutput});
 
         for(size_t i = 0; i < images.size(); i++)
         {
@@ -53,7 +53,7 @@ namespace foray::bmfr
 
         {  // Read Only Images
             std::vector<core::ManagedImage*> readOnlyImages({mBmfrStage->mInputs.Primary, mBmfrStage->mInputs.Position, &mBmfrStage->mHistory.Position.GetHistoryImage(), mBmfrStage->mInputs.Normal,
-                                                             &mBmfrStage->mHistory.Normal.GetHistoryImage(), mBmfrStage->mInputs.Motion});
+                                                             &mBmfrStage->mHistory.Normal.GetHistoryImage(), mBmfrStage->mInputs.Motion, mBmfrStage->mPrimaryOutput});
 
             for(core::ManagedImage* image : readOnlyImages)
             {

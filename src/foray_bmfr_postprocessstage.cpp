@@ -11,8 +11,8 @@ namespace foray::bmfr {
 
     void PostProcessStage::ApiInitShader()
     {
-        mShader.LoadFromSource(mContext, SHADER_DIR "/postprocess.comp");
-        mShaderSourcePaths.push_back(SHADER_DIR "/postprocess.comp");
+        mShader.LoadFromSource(mContext, BMFR_SHADER_DIR "/postprocess.comp");
+        mShaderSourcePaths.push_back(BMFR_SHADER_DIR "/postprocess.comp");
     }
     void PostProcessStage::ApiCreateDescriptorSet()
     {
@@ -20,7 +20,7 @@ namespace foray::bmfr {
     }
     void PostProcessStage::UpdateDescriptorSet()
     {
-        std::vector<core::ManagedImage*> images({&mBmfrStage->mFilterImage, &mBmfrStage->mAccuImages.Filtered, mBmfrStage->mInputs.Motion, &mBmfrStage->mAccuImages.AcceptBools});
+        std::vector<core::ManagedImage*> images({&mBmfrStage->mFilterImage, &mBmfrStage->mAccuImages.Filtered, mBmfrStage->mInputs.Motion, &mBmfrStage->mAccuImages.AcceptBools, mBmfrStage->mPrimaryOutput});
 
         for(size_t i = 0; i < images.size(); i++)
         {
@@ -50,7 +50,7 @@ namespace foray::bmfr {
         std::vector<VkImageMemoryBarrier2> vkBarriers;
 
         {  // Read Only Images
-            std::vector<core::ManagedImage*> readOnlyImages({&mBmfrStage->mFilterImage, mBmfrStage->mInputs.Motion, &mBmfrStage->mAccuImages.AcceptBools});
+            std::vector<core::ManagedImage*> readOnlyImages({&mBmfrStage->mFilterImage, mBmfrStage->mInputs.Motion, &mBmfrStage->mAccuImages.AcceptBools, mBmfrStage->mPrimaryOutput});
 
             for(core::ManagedImage* image : readOnlyImages)
             {

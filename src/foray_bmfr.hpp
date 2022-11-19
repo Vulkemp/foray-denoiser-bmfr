@@ -5,6 +5,7 @@
 #include <core/foray_managedimage.hpp>
 #include <stages/foray_denoiserstage.hpp>
 #include <util/foray_historyimage.hpp>
+#include "shaders/debug.glsl.h"
 
 namespace foray::bmfr {
     class PreProcessStage;
@@ -59,7 +60,7 @@ namespace foray::bmfr {
             bool               Valid = false;
         } mHistory;
 
-        uint32_t mDebugMode = 0;
+        uint32_t mDebugMode = DEBUG_NONE;
 
         PreProcessStage  mPreProcessStage;
         RegressionStage  mRegressionStage;
