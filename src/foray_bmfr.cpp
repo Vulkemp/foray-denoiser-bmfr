@@ -1,4 +1,5 @@
 #include "foray_bmfr.hpp"
+#include <bench/foray_devicebenchmark.hpp>
 #include <imgui/imgui.h>
 
 namespace foray::bmfr {
@@ -55,6 +56,16 @@ namespace foray::bmfr {
         mPreProcessStage.Init(this);
         // mRegressionStage.Init(this);
         mPostProcessStage.Init(this);
+
+        mBenchmark = config.Benchmark;
+        if(!!mBenchmark)
+        {
+            std::vector<const char*> queryNames(
+                {bench::BenchmarkTimestamp::BEGIN, TIMESTAMP_PreProcess, TIMESTAMP_Regression, TIMESTAMP_PostProcess, bench::BenchmarkTimestamp::END});
+            mBenchmark->Create(mContext, queryNames);
+        }
+
+        mInitialized = true;
     }
     std::string BmfrDenoiser::GetUILabel()
     {
@@ -92,13 +103,37 @@ namespace foray::bmfr {
         mHistory.Position.ApplyToLayoutCache(renderInfo.GetImageLayoutCache());
         mHistory.Normal.ApplyToLayoutCache(renderInfo.GetImageLayoutCache());
 
+        uint32_t                frameIdx = renderInfo.GetFrameNumber();
+        VkPipelineStageFlagBits compute  = VkPipelineStageFlagBits::VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+        if(!!mBenchmark)
+        {
+            mBenchmark->CmdResetQuery(cmdBuffer, frameIdx);
+            mBenchmark->CmdWriteTimestamp(cmdBuffer, frameIdx, bench::BenchmarkTimestamp::BEGIN, compute);
+        }
         mPreProcessStage.RecordFrame(cmdBuffer, renderInfo);
+        if(!!mBenchmark)
+        {
+            mBenchmark->CmdWriteTimestamp(cmdBuffer, frameIdx, TIMESTAMP_PreProcess, compute);
+        }
         // mRegressionStage.RecordFrame(cmdBuffer, renderInfo);
+        if(!!mBenchmark)
+        {
+            mBenchmark->CmdWriteTimestamp(cmdBuffer, frameIdx, TIMESTAMP_Regression, compute);
+        }
         mPostProcessStage.RecordFrame(cmdBuffer, renderInfo);
+        if(!!mBenchmark)
+        {
+            mBenchmark->CmdWriteTimestamp(cmdBuffer, frameIdx, TIMESTAMP_PostProcess, VkPipelineStageFlagBits::VK_PIPELINE_STAGE_TRANSFER_BIT);
+        }
 
         std::vector<util::HistoryImage*> historyImages({&mHistory.Position, &mHistory.Normal});
         util::HistoryImage::sMultiCopySourceToHistory(historyImages, cmdBuffer, renderInfo);
         mHistory.Valid = true;
+        if(!!mBenchmark)
+        {
+            mBenchmark->CmdWriteTimestamp(cmdBuffer, frameIdx, bench::BenchmarkTimestamp::END, VkPipelineStageFlagBits::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        }
     }
     void BmfrDenoiser::OnShadersRecompiled()
     {
@@ -108,6 +143,11 @@ namespace foray::bmfr {
     }
     void BmfrDenoiser::Resize(const VkExtent2D& size)
     {
+        if (!mInitialized)
+        {
+            return;
+        }
+
         std::vector<core::ManagedImage*> images({&mAccuImages.Input, &mAccuImages.Filtered, &mAccuImages.AcceptBools, &mFilterImage});
         for(core::ManagedImage* image : images)
         {
@@ -125,7 +165,9 @@ namespace foray::bmfr {
         IgnoreHistoryNextFrame();
     }
     void BmfrDenoiser::Destroy()
-    {
+    {   
+        mInitialized = false;
+
         mPostProcessStage.Destroy();
         // mRegressionStage.Destroy();
         mPreProcessStage.Destroy();
@@ -138,6 +180,12 @@ namespace foray::bmfr {
         for(util::HistoryImage* image : historyImages)
         {
             image->Destroy();
+        }
+
+        if(!!mBenchmark)
+        {
+            mBenchmark->Destroy();
+            mBenchmark = nullptr;
         }
     }
 

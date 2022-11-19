@@ -65,5 +65,13 @@ namespace foray::bmfr {
         PreProcessStage  mPreProcessStage;
         RegressionStage  mRegressionStage;
         PostProcessStage mPostProcessStage;
+
+        inline static const char* TIMESTAMP_PreProcess = "PreProcess";
+        inline static const char* TIMESTAMP_Regression        = "Regression";
+        inline static const char* TIMESTAMP_PostProcess  = "PostProcess";
+
+        bench::DeviceBenchmark* mBenchmark = nullptr;
+
+        bool mInitialized = false;
     };
 }  // namespace foray::bmfr
