@@ -1,0 +1,274 @@
+#version 430
+#extension GL_KHR_vulkan_glsl : enable
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_EXT_debug_printf : enable
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(rgba16f, binding = 0) uniform readonly image2D GbufferPositions;
+layout(rgba16f, binding = 0) uniform readonly image2D GbufferNormals;
+layout(rgba16f, binding = 0) uniform readonly image2D GbufferAlbedo;
+
+layout(r16f, binding = 0) uniform coherent image2D TempData;
+layout(r16f, binding = 0) uniform image2D OutData;
+
+layout(rgba16f, binding = 0) uniform image2DArray Input;
+layout(rgba16f, binding = 0) uniform image2DArray Output;
+
+// Features used for regression
+const uint FEATURES_COUNT = 10; // constant 1, 3x normal, 3x position, 3x position squared
+const uint FEATURES_NOT_SCALED = 4; // constant 1, 3x normal do not need normalizing
+// Features + albedo removed noisy input
+const uint BUFFERS_COUNT = FEATURES_COUNT + 3; // features + noisy w/o albedo
+
+// edge length of a block
+const uint BLOCK_EDGE = 32;
+// pixel count of a block
+const uint BLOCK_SIZE = BLOCK_EDGE * BLOCK_EDGE; // 1024
+
+// For full pixel operations, this is the amount of pixels each invocation accesses
+const uint SUBVECTOR_SIZE = BLOCK_SIZE / gl_WorkGroupSize.x; // 4
+
+const uint BLOCK_OFFSET_COUNT = 16;
+
+const ivec2 BLOCK_OFFSETS[BLOCK_OFFSET_COUNT] = 
+{
+
+	ivec2(-30, -30),
+	ivec2(-12, -22),
+	ivec2(-24, -2),
+	ivec2(-8, -16),
+	ivec2(-26, -24),
+	ivec2(-14, -4),
+	ivec2(-4, -28),
+	ivec2(-26, -16),
+	ivec2(-4, -2),
+	ivec2(-24, -32),
+	ivec2(-10, -10),
+	ivec2(-18, -18),
+	ivec2(-12, -30),
+	ivec2(-32, -4),
+	ivec2(-2, -20),
+	ivec2(-22, -12)
+};
+
+// Variables shared between invocations of one work group
+shared struct Shared_T
+{
+    float SumVec[gl_WorkGroupSize.x];
+    float UVec[BLOCK_SIZE];
+    float GChannel[BLOCK_SIZE];
+    float BChannel[BLOCK_SIZE];
+    float RMat[FEATURES_COUNT][BUFFERS_COUNT];
+    float ULengthSquared;
+    float DotV;
+    float BlockMin;
+    float BlockMax;
+    float VecLength;
+}
+Shared;
+
+layout (push_constant) uniform push_constant_t
+{
+    uint FrameIdx;
+    uint DispatchWidth;
+    uint ReadIdx;
+    uint WriteIdx;
+} PushC;
+
+int mirror(int idx, int size)
+{
+    if (idx < 0)
+    {
+        return abs(idx) - 1;
+    }
+    else if (idx >= size)
+    {
+        return 2 * size - idx - 1;
+    }
+    return idx;
+}
+
+ivec2 mirror2(ivec2 texel, ivec2 size)
+{
+    return ivec2(mirror(texel.x, size.x), mirror(texel.y, size.y));
+}
+
+void fullBarrier()
+{
+    barrier();
+    memoryBarrier();
+}
+
+// TempData
+//  * 0  1  2  3  ...  x   (Pixels of a block = 1024)
+//  0  BLOCK # 0
+//  1 
+//  2
+//  3
+//  .
+//  13 BLOCK # 1
+//  .
+//  26 BLOCK # 2
+//  .
+//  y
+//  (block features * workgroup count)
+
+ivec2 calcSubvectorTexel(uint subIdx, uint featureIdx)
+{
+    return ivec2(subIdx * gl_WorkGroupSize.x + gl_LocalInvocationIndex, gl_WorkGroupID.x * BUFFERS_COUNT + featureIdx);
+}
+
+#define PARALLEL_REDUCTION(operation, outvar) \
+if(gl_LocalInvocationIndex < 128) \
+    Shared.SumVec[gl_LocalInvocationIndex] = operation(Shared.SumVec[gl_LocalInvocationIndex], Shared.SumVec[gl_LocalInvocationIndex + 128]); \
+fullBarrier(); \
+if(gl_LocalInvocationIndex < 64) \
+    Shared.SumVec[gl_LocalInvocationIndex] = operation(Shared.SumVec[gl_LocalInvocationIndex], Shared.SumVec[gl_LocalInvocationIndex + 64]); \
+fullBarrier(); \
+if(gl_LocalInvocationIndex < 32)  \
+    Shared.SumVec[gl_LocalInvocationIndex] = operation(Shared.SumVec[gl_LocalInvocationIndex], Shared.SumVec[gl_LocalInvocationIndex + 32]); \
+fullBarrier(); \
+if(gl_LocalInvocationIndex < 16)  \
+    Shared.SumVec[gl_LocalInvocationIndex] = operation(Shared.SumVec[gl_LocalInvocationIndex], Shared.SumVec[gl_LocalInvocationIndex + 16]); \
+fullBarrier(); \
+if(gl_LocalInvocationIndex < 8)  \
+    Shared.SumVec[gl_LocalInvocationIndex] = operation(Shared.SumVec[gl_LocalInvocationIndex], Shared.SumVec[gl_LocalInvocationIndex + 8]); \
+fullBarrier(); \
+if(gl_LocalInvocationIndex < 4)  \
+    Shared.SumVec[gl_LocalInvocationIndex] = operation(Shared.SumVec[gl_LocalInvocationIndex], Shared.SumVec[gl_LocalInvocationIndex + 4]); \
+fullBarrier(); \
+if(gl_LocalInvocationIndex < 2)  \
+    Shared.SumVec[gl_LocalInvocationIndex] = operation(Shared.SumVec[gl_LocalInvocationIndex], Shared.SumVec[gl_LocalInvocationIndex + 2]); \
+fullBarrier(); \
+if(gl_LocalInvocationIndex == 0)  \
+    outvar = operation(Shared.SumVec[0], Shared.SumVec[1]); \
+fullBarrier();
+
+
+void main()
+{
+    // Unique work group index
+    const uint WorkGroupIdx = gl_WorkGroupID.x;
+    // Work group id (2 dimensional, use dispatch width to determine coordinates)
+    const ivec2 WorkGroupID = ivec2(WorkGroupIdx % PushC.DispatchWidth, WorkGroupIdx / PushC.DispatchWidth);
+
+    // y coordinate offset in tempData for this block
+    const uint BLOCK_OFFSET = WorkGroupIdx * BUFFERS_COUNT;
+
+    const ivec2 RenderSize = imageSize(Input).xy;
+
+    { // Copy input & feature buffers to temp data image
+        for(uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+        {
+            uint index = subIdx * WorkGroupIdx + gl_LocalInvocationIndex;
+
+            ivec2 readTexel = 
+                ivec2(WorkGroupID * BLOCK_EDGE) +                   // Select fist pixel of current Block (Group ID * edge length)
+                ivec2(index % BLOCK_EDGE, index / BLOCK_EDGE) +     // Select subvector pixel
+                BLOCK_OFFSETS[PushC.FrameIdx % BLOCK_OFFSET_COUNT]; // Add Block Offset
+            readTexel = mirror2(readTexel, RenderSize); // Mirror if coordinate is out of screen bounds
+
+            // Constant 1.f value
+            imageStore(TempData, calcSubvectorTexel(subIdx, 0), vec4(1.f));
+
+            // Normals
+            vec3 normal = imageLoad(GbufferNormals, readTexel).rgb;
+            imageStore(TempData, calcSubvectorTexel(subIdx, 1), vec4(normal.r));
+            imageStore(TempData, calcSubvectorTexel(subIdx, 2), vec4(normal.g));
+            imageStore(TempData, calcSubvectorTexel(subIdx, 3), vec4(normal.b));
+
+            // Positions
+            vec3 position = imageLoad(GbufferPositions, readTexel).rgb;
+            imageStore(TempData, calcSubvectorTexel(subIdx, 4), vec4(position.r));
+            imageStore(TempData, calcSubvectorTexel(subIdx, 5), vec4(position.g));
+            imageStore(TempData, calcSubvectorTexel(subIdx, 6), vec4(position.b));
+
+            // Positions squared
+            position *= position;
+            imageStore(TempData, calcSubvectorTexel(subIdx, 7), vec4(position.r));
+            imageStore(TempData, calcSubvectorTexel(subIdx, 8), vec4(position.g));
+            imageStore(TempData, calcSubvectorTexel(subIdx, 9), vec4(position.b));
+
+            // Albedo
+            vec3 color = imageLoad(Input, ivec3(readTexel, PushC.ReadIdx)).rgb;
+            vec3 albedo = imageLoad(GbufferAlbedo, readTexel).rgb;
+            color.r = albedo.r < 0.01f ? 0.f : color.r / albedo.r;
+            color.g = albedo.g < 0.01f ? 0.f : color.g / albedo.g;
+            color.b = albedo.b < 0.01f ? 0.f : color.b / albedo.b;
+            imageStore(TempData, calcSubvectorTexel(subIdx, 10), vec4(color.r));
+            imageStore(TempData, calcSubvectorTexel(subIdx, 11), vec4(color.g));
+            imageStore(TempData, calcSubvectorTexel(subIdx, 12), vec4(color.b));
+        }
+
+        fullBarrier();
+    }
+    { // Calculate min/max, normalize positions & positions squared features
+        for(uint featureIdx = FEATURES_NOT_SCALED; featureIdx < FEATURES_COUNT; featureIdx++) 
+        {
+            float tempMax = 0;
+            float tempMin = 0;
+
+            for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+            {
+                float value = imageLoad(TempData, calcSubvectorTexel(subIdx, featureIdx)).r;
+                tempMax = max(tempMax, value);
+                tempMin = min(tempMin, value);
+            }
+
+            Shared.SumVec[gl_LocalInvocationIndex] = tempMax;
+            fullBarrier();
+        
+            // parallel reduction find max
+            PARALLEL_REDUCTION(max, Shared.BlockMax)
+
+            Shared.SumVec[gl_LocalInvocationIndex] = tempMin;
+            fullBarrier();
+
+            // parallel reduction find min
+            PARALLEL_REDUCTION(min, Shared.BlockMin)
+
+            float diff = Shared.BlockMax - Shared.BlockMin;
+            diff = max(diff, 1.f);
+            for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+            {
+                ivec2 texel = calcSubvectorTexel(subIdx, featureIdx);
+                float normalized = (imageLoad(TempData, texel).r - Shared.BlockMin) / diff;
+                imageStore(OutData, texel, vec4(normalized));
+                imageStore(TempData, texel, vec4(normalized));
+            }
+        }
+    }
+    { // Copy non-normalized buffers to outData
+        // Color
+        for(uint featureIdx = FEATURES_COUNT; featureIdx < BUFFERS_COUNT; featureIdx++) 
+        {
+            for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+            {
+                ivec2 texel = calcSubvectorTexel(subIdx, featureIdx);
+                float value = imageLoad(TempData, texel).r;
+                imageStore(OutData, texel, vec4(value));
+            }
+        }
+        // Constant 1 & normals
+        for(uint featureIdx = 0; featureIdx < FEATURES_NOT_SCALED; featureIdx++) 
+        {
+            for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+            {
+                ivec2 texel = calcSubvectorTexel(subIdx, featureIdx);
+                float value = imageLoad(TempData, texel).r;
+                imageStore(OutData, texel, vec4(value));
+            }
+        }
+
+        fullBarrier();
+    }
+    { // Householder QR decomposition
+        int limit = 0;
+        for (uint featureIdx = 0; featureIdx < FEATURES_COUNT; featureIdx++)
+        {
+            float tempSum = 0;
+            
+        }
+    }
+}
