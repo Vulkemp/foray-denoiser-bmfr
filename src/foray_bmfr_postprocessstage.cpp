@@ -108,13 +108,12 @@ namespace foray::bmfr {
 
     void PostProcessStage::ApiBeforeDispatch(VkCommandBuffer cmdBuffer, base::FrameRenderInfo& renderInfo, glm::uvec3& groupSize)
     {
-        PushConstant pushC                             = PushConstant();
-        pushC.ReadIdx                                  = renderInfo.GetFrameNumber() % 2;
-        pushC.WriteIdx                                 = (renderInfo.GetFrameNumber() + 1) % 2;
-        pushC.EnableHistory                            = mBmfrStage->mHistory.Valid;
-        pushC.DebugMode                                = mBmfrStage->mDebugMode;
-        mBmfrStage->mAccuImages.LastInputArrayWriteIdx = pushC.WriteIdx;
-        vkCmdPushConstants(cmdBuffer, mPipelineLayout, VkShaderStageFlagBits::VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pushC), &pushC);
+        mPushC.ReadIdx                                 = renderInfo.GetFrameNumber() % 2;
+        mPushC.WriteIdx                                = (renderInfo.GetFrameNumber() + 1) % 2;
+        mPushC.EnableHistory                           = mBmfrStage->mHistory.Valid;
+        mPushC.DebugMode                               = mBmfrStage->mDebugMode;
+        mBmfrStage->mAccuImages.LastInputArrayWriteIdx = mPushC.WriteIdx;
+        vkCmdPushConstants(cmdBuffer, mPipelineLayout, VkShaderStageFlagBits::VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(mPushC), &mPushC);
 
         VkExtent2D size = renderInfo.GetRenderSize();
 

@@ -97,19 +97,65 @@ namespace foray::bmfr {
     void BmfrDenoiser::DisplayImguiConfiguration()
     {
         const char* debugModes[] = {
-            "DEBUG_NONE",
-            "DEBUG_PREPROCESS_OUT",
-            "DEBUG_PREPROCESS_ACCEPTS",
-            "DEBUG_PREPROCESS_ALPHA",
-            "DEBUG_REGRESSION_OUT",
-            "DEBUG_REGRESSION_BLOCKS",
-            "DEBUG_POSTPROCESS_ACCEPTS",
-            "DEBUG_POSTPROCESS_ALPHA",
+            "DEBUG_NONE",           "DEBUG_PREPROCESS_OUT",    "DEBUG_PREPROCESS_ACCEPTS",  "DEBUG_PREPROCESS_ALPHA",
+            "DEBUG_REGRESSION_OUT", "DEBUG_REGRESSION_BLOCKS", "DEBUG_POSTPROCESS_ACCEPTS", "DEBUG_POSTPROCESS_ALPHA",
         };
         int debugMode = (int)mDebugMode;
         if(ImGui::Combo("Debug Mode", &debugMode, debugModes, sizeof(debugModes) / sizeof(const char*)))
         {
             mDebugMode = (uint32_t)debugMode;
+        }
+        if(ImGui::CollapsingHeader("PreProcess"))
+        {
+            float maxNormalDiffDegrees = glm::degrees(glm::asin(mPreProcessStage.mPushC.MaxNormalDeviation));
+            if(ImGui::SliderFloat("Pre Max Normal Deviation (deg)", &maxNormalDiffDegrees, 0.01f, 179.99f))
+            {
+                mPreProcessStage.mPushC.MaxNormalDeviation = glm::sin(glm::radians(maxNormalDiffDegrees));
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("In degrees. Default Value 15 degrees");
+
+            float maxPositionDiff = mPreProcessStage.mPushC.MaxPositionDifference;
+            if(ImGui::SliderFloat("Pre Max Position Difference (m)", &maxPositionDiff, 0.0001f, 2.f))
+            {
+                mPreProcessStage.mPushC.MaxPositionDifference = maxPositionDiff;
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("In meters. Default Value 0.15 meters");
+
+            float weightThreshhold = mPreProcessStage.mPushC.WeightThreshhold;
+            if(ImGui::SliderFloat("Pre Weight Threshhold", &weightThreshhold, 0.00001f, 1.f))
+            {
+                mPreProcessStage.mPushC.WeightThreshhold = weightThreshhold;
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Default Value 0.01");
+
+            float minNewDataWeight = mPreProcessStage.mPushC.MinNewDataWeight;
+            if(ImGui::SliderFloat("Pre Minimum New Data Weight", &minNewDataWeight, 0.00001f, 1.f))
+            {
+                mPreProcessStage.mPushC.MinNewDataWeight = minNewDataWeight;
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Default Value 0.1");
+        }
+        if(ImGui::CollapsingHeader("PostProcess"))
+        {
+            float weightThreshhold = mPostProcessStage.mPushC.WeightThreshhold;
+            if(ImGui::SliderFloat("Post Weight Threshhold", &weightThreshhold, 0.00001f, 1.f))
+            {
+                mPostProcessStage.mPushC.WeightThreshhold = weightThreshhold;
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Default Value 0.01");
+
+            float minNewDataWeight = mPostProcessStage.mPushC.MinNewDataWeight;
+            if(ImGui::SliderFloat("Post Minimum New Data Weight", &minNewDataWeight, 0.00001f, 1.f))
+            {
+                mPostProcessStage.mPushC.MinNewDataWeight = minNewDataWeight;
+            }
+            if(ImGui::IsItemHovered())
+                ImGui::SetTooltip("Default Value 0.167");
         }
     }
     void BmfrDenoiser::IgnoreHistoryNextFrame()

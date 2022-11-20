@@ -7,6 +7,7 @@ namespace foray::bmfr {
 
     class PostProcessStage : public foray::stages::ComputeStage
     {
+      friend BmfrDenoiser;
       public:
         void Init(BmfrDenoiser* bmfrStage);
 
@@ -24,10 +25,10 @@ namespace foray::bmfr {
             // Combined Weight Threshhold (Default 0.01)
             fp32_t WeightThreshhold = 0.01f;
             // Minimum weight assigned to new data
-            fp32_t MinNewDataWeight = 0.1f;
+            fp32_t MinNewDataWeight = 0.166666667f;
             uint32_t  EnableHistory;
             uint32_t  DebugMode;
-        };
+        } mPushC;
 
         virtual void ApiInitShader() override;
         virtual void ApiCreateDescriptorSet() override;

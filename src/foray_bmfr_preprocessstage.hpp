@@ -7,6 +7,7 @@ namespace foray::bmfr {
 
     class PreProcessStage : public foray::stages::ComputeStage
     {
+        friend BmfrDenoiser;
       public:
         void Init(BmfrDenoiser* bmfrStage);
 
@@ -31,7 +32,7 @@ namespace foray::bmfr {
             fp32_t   MinNewDataWeight = 0.1f;
             uint32_t EnableHistory;
             uint32_t DebugMode;
-        };
+        } mPushC;
 
         virtual void ApiInitShader() override;
         virtual void ApiCreateDescriptorSet() override;
