@@ -1,5 +1,6 @@
 #pragma once
 #include <stages/foray_computestage.hpp>
+#include "shaders/debug.glsl.h"
 
 namespace foray::bmfr {
     class BmfrDenoiser;
@@ -16,9 +17,10 @@ namespace foray::bmfr {
 
         struct PushConstant
         {
-            uint FrameIdx;
-            uint DispatchWidth;
-            uint ReadIdx;
+            uint32_t FrameIdx;
+            uint32_t DispatchWidth;
+            uint32_t ReadIdx;
+            uint32_t DebugMode = DEBUG_NONE;
         } mPushC;
 
         virtual void ApiInitShader() override;

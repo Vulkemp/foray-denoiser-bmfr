@@ -96,7 +96,7 @@ void main()
         vec4 accuColorPlusHistlen = vec4(mix(prevColor, currColor, colorAlpha), min(64, historyLength + 1.f));
         imageStore(AccumulatedColor, ivec3(currTexel, PushC.WriteIdx), accuColorPlusHistlen);
 
-        if (PushC.DebugMode == DEBUG_POSTPROCESS_OUT)
+        if (PushC.DebugMode == DEBUG_NONE)
         {
             imageStore(DebugOutput, currTexel, vec4(mix(prevColor, currColor, colorAlpha), 1.f));
         }
@@ -109,7 +109,7 @@ void main()
     else
     {
         imageStore(AccumulatedColor, ivec3(currTexel, PushC.WriteIdx), vec4(currColor, 1.f));
-        if (PushC.DebugMode == DEBUG_POSTPROCESS_OUT)
+        if (PushC.DebugMode == DEBUG_NONE)
         {
             imageStore(DebugOutput, currTexel, vec4(currColor, 1.f));
         }

@@ -1,8 +1,7 @@
 #include "foray_bmfr_preprocessstage.hpp"
 #include "foray_bmfr.hpp"
 
-namespace foray::bmfr
-{
+namespace foray::bmfr {
     void PreProcessStage::Init(BmfrDenoiser* bmfrStage)
     {
         Destroy();
@@ -21,8 +20,9 @@ namespace foray::bmfr
     }
     void PreProcessStage::UpdateDescriptorSet()
     {
-        std::vector<core::ManagedImage*> images({mBmfrStage->mInputs.Primary, mBmfrStage->mInputs.Position, &mBmfrStage->mHistory.Position.GetHistoryImage(), mBmfrStage->mInputs.Normal,
-                                                 &mBmfrStage->mHistory.Normal.GetHistoryImage(), mBmfrStage->mInputs.Motion, &mBmfrStage->mAccuImages.Input, &mBmfrStage->mAccuImages.AcceptBools, mBmfrStage->mPrimaryOutput});
+        std::vector<core::ManagedImage*> images({mBmfrStage->mInputs.Primary, mBmfrStage->mInputs.Position, &mBmfrStage->mHistory.Position.GetHistoryImage(),
+                                                 mBmfrStage->mInputs.Normal, &mBmfrStage->mHistory.Normal.GetHistoryImage(), mBmfrStage->mInputs.Motion,
+                                                 &mBmfrStage->mAccuImages.Input, &mBmfrStage->mAccuImages.AcceptBools, mBmfrStage->mPrimaryOutput});
 
         for(size_t i = 0; i < images.size(); i++)
         {
@@ -52,8 +52,8 @@ namespace foray::bmfr
         std::vector<VkImageMemoryBarrier2> vkBarriers;
 
         {  // Read Only Images
-            std::vector<core::ManagedImage*> readOnlyImages({mBmfrStage->mInputs.Primary, mBmfrStage->mInputs.Position, &mBmfrStage->mHistory.Position.GetHistoryImage(), mBmfrStage->mInputs.Normal,
-                                                             &mBmfrStage->mHistory.Normal.GetHistoryImage(), mBmfrStage->mInputs.Motion, mBmfrStage->mPrimaryOutput});
+            std::vector<core::ManagedImage*> readOnlyImages({mBmfrStage->mInputs.Primary, mBmfrStage->mInputs.Position, &mBmfrStage->mHistory.Position.GetHistoryImage(),
+                                                             mBmfrStage->mInputs.Normal, &mBmfrStage->mHistory.Normal.GetHistoryImage(), mBmfrStage->mInputs.Motion});
 
             for(core::ManagedImage* image : readOnlyImages)
             {
@@ -68,36 +68,45 @@ namespace foray::bmfr
             }
         }
         {
-            VkImageLayout oldLayout = renderInfo.GetImageLayoutCache().Get(mBmfrStage->mAccuImages.Input);
-            uint32_t readIdx = renderInfo.GetFrameNumber() % 2;
-            uint32_t writeIdx = (renderInfo.GetFrameNumber() + 1) % 2;
+            VkImageLayout                    oldLayout = renderInfo.GetImageLayoutCache().Get(mBmfrStage->mAccuImages.Input);
+            uint32_t                         readIdx   = renderInfo.GetFrameNumber() % 2;
+            uint32_t                         writeIdx  = (renderInfo.GetFrameNumber() + 1) % 2;
             core::ImageLayoutCache::Barrier2 readBarrier{
-                .SrcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .SrcAccessMask    = VK_ACCESS_2_MEMORY_WRITE_BIT,
-                .DstStageMask     = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                .DstAccessMask    = VK_ACCESS_2_SHADER_READ_BIT,
-                .NewLayout        = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL,
-                .SubresourceRange = VkImageSubresourceRange{.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1U, .baseArrayLayer = readIdx, .layerCount = 1U}};
+                .SrcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                .SrcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+                .DstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .DstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+                .NewLayout     = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL,
+                .SubresourceRange =
+                    VkImageSubresourceRange{.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1U, .baseArrayLayer = readIdx, .layerCount = 1U}};
             vkBarriers.push_back(renderInfo.GetImageLayoutCache().MakeBarrier(mBmfrStage->mAccuImages.Input, readBarrier));
             core::ImageLayoutCache::Barrier2 writeBarrier{
-                .SrcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .SrcAccessMask    = VK_ACCESS_2_MEMORY_READ_BIT,
-                .DstStageMask     = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                .DstAccessMask    = VK_ACCESS_2_SHADER_WRITE_BIT,
-                .NewLayout        = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL,
-                .SubresourceRange = VkImageSubresourceRange{.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1U, .baseArrayLayer = writeIdx, .layerCount = 1U}};
-            auto vkBarrier = renderInfo.GetImageLayoutCache().MakeBarrier(mBmfrStage->mAccuImages.Input, writeBarrier);
+                .SrcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                .SrcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
+                .DstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .DstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+                .NewLayout     = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL,
+                .SubresourceRange =
+                    VkImageSubresourceRange{.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1U, .baseArrayLayer = writeIdx, .layerCount = 1U}};
+            auto vkBarrier      = renderInfo.GetImageLayoutCache().MakeBarrier(mBmfrStage->mAccuImages.Input, writeBarrier);
             vkBarrier.oldLayout = oldLayout;
             vkBarriers.push_back(vkBarrier);
         }
         {
-            core::ImageLayoutCache::Barrier2 barrier{
-                .SrcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .SrcAccessMask    = VK_ACCESS_2_MEMORY_READ_BIT,
-                .DstStageMask     = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                .DstAccessMask    = VK_ACCESS_2_SHADER_WRITE_BIT,
-                .NewLayout        = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL};
+            core::ImageLayoutCache::Barrier2 barrier{.SrcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                                     .SrcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
+                                                     .DstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                                     .DstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+                                                     .NewLayout     = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL};
             vkBarriers.push_back(renderInfo.GetImageLayoutCache().MakeBarrier(mBmfrStage->mAccuImages.AcceptBools, barrier));
+        }
+        {
+            core::ImageLayoutCache::Barrier2 barrier{.SrcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                                     .SrcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
+                                                     .DstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                                     .DstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+                                                     .NewLayout     = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL};
+            vkBarriers.push_back(renderInfo.GetImageLayoutCache().MakeBarrier(mBmfrStage->mPrimaryOutput, barrier));
         }
 
         VkDependencyInfo depInfo{
@@ -122,6 +131,5 @@ namespace foray::bmfr
         glm::uvec2 FrameSize(size.width, size.height);
 
         groupSize = glm::uvec3((FrameSize.x + localSize.x - 1) / localSize.x, (FrameSize.y + localSize.y - 1) / localSize.y, 1);
-
     }
 }  // namespace foray::bmfr

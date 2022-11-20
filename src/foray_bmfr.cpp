@@ -101,7 +101,8 @@ namespace foray::bmfr {
             "DEBUG_PREPROCESS_OUT",
             "DEBUG_PREPROCESS_ACCEPTS",
             "DEBUG_PREPROCESS_ALPHA",
-            "DEBUG_POSTPROCESS_OUT",
+            "DEBUG_REGRESSION_OUT",
+            "DEBUG_REGRESSION_BLOCKS",
             "DEBUG_POSTPROCESS_ACCEPTS",
             "DEBUG_POSTPROCESS_ALPHA",
         };

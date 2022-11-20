@@ -3,17 +3,34 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_debug_printf : enable
 
+#include "debug.glsl.h"
+
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(rgba16f, binding = 0) uniform readonly image2D GbufferPositions;
 layout(rgba16f, binding = 1) uniform readonly image2D GbufferNormals;
 layout(rgba16f, binding = 2) uniform readonly image2D GbufferAlbedo;
 
+// TempData
+//  * 0  1  2  3  ...  x   (Pixels of a block = 1024)
+//  0  BLOCK # 0
+//  1 
+//  2
+//  3
+//  .
+//  13 BLOCK # 1
+//  .
+//  26 BLOCK # 2
+//  .
+//  y
+//  (block features * workgroup count)
+
 layout(r16f, binding = 3) uniform coherent image2D TempData;
 layout(r16f, binding = 4) uniform image2D OutData;
 
-layout(rgba16f, binding = 5) uniform image2DArray Input;
-layout(rgba16f, binding = 6) uniform image2D Output;
+layout(rgba16f, binding = 5) uniform readonly image2DArray Input;
+layout(rgba16f, binding = 6) uniform writeonly image2D Output;
+layout(rgba16f, binding = 7) uniform writeonly image2D DebugOutput;
 
 // Features used for regression
 const uint FEATURES_COUNT = 10; // constant 1, 3x normal, 3x position, 3x position squared
@@ -73,6 +90,7 @@ layout (push_constant) uniform push_constant_t
     uint FrameIdx;
     uint DispatchWidth;
     uint ReadIdx;
+    uint DebugMode;
 } PushC;
 
 int mirror(int idx, int size)
@@ -99,26 +117,19 @@ void fullBarrier()
     memoryBarrier();
 }
 
-// TempData
-//  * 0  1  2  3  ...  x   (Pixels of a block = 1024)
-//  0  BLOCK # 0
-//  1 
-//  2
-//  3
-//  .
-//  13 BLOCK # 1
-//  .
-//  26 BLOCK # 2
-//  .
-//  y
-//  (block features * workgroup count)
+int calcIndex(uint subIdx)
+{
+    return int(subIdx * gl_WorkGroupSize.x + gl_LocalInvocationIndex);
+}
 
 ivec2 calcSubvectorTexel(uint subIdx, uint featureIdx)
 {
-    return ivec2(subIdx * gl_WorkGroupSize.x + gl_LocalInvocationIndex, gl_WorkGroupID.x * BUFFERS_COUNT + featureIdx);
+    return ivec2(calcIndex(subIdx), gl_WorkGroupID.x * BUFFERS_COUNT + featureIdx);
 }
 
-#define PARALLEL_REDUCTION(operation, outvar) \
+#define PARALLEL_REDUCTION(operation, invar, outvar) \
+Shared.SumVec[gl_LocalInvocationIndex] = invar; \
+fullBarrier(); \
 if(gl_LocalInvocationIndex < 128) \
     Shared.SumVec[gl_LocalInvocationIndex] = operation(Shared.SumVec[gl_LocalInvocationIndex], Shared.SumVec[gl_LocalInvocationIndex + 128]); \
 fullBarrier(); \
@@ -142,11 +153,18 @@ if(gl_LocalInvocationIndex < 2)  \
 fullBarrier(); \
 if(gl_LocalInvocationIndex == 0)  \
     outvar = operation(Shared.SumVec[0], Shared.SumVec[1]); \
-fullBarrier();
+fullBarrier(); \
 
 float add(float a, float b)
 {
     return a + b;
+}
+
+ivec2 calculateRenderTexel(ivec2 WorkGroupID, uint index)
+{
+    return ivec2(WorkGroupID * BLOCK_EDGE) +                   // Select fist pixel of current Block (Group ID * edge length)
+        ivec2(index % BLOCK_EDGE, index / BLOCK_EDGE) +     // Select subvector pixel
+        BLOCK_OFFSETS[PushC.FrameIdx % BLOCK_OFFSET_COUNT]; // Add Block Offset
 }
 
 void main()
@@ -164,12 +182,9 @@ void main()
     { // Copy input & feature buffers to temp data image
         for(uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
         {
-            uint index = subIdx * WorkGroupIdx + gl_LocalInvocationIndex;
+            uint index = calcIndex(subIdx);
 
-            ivec2 readTexel = 
-                ivec2(WorkGroupID * BLOCK_EDGE) +                   // Select fist pixel of current Block (Group ID * edge length)
-                ivec2(index % BLOCK_EDGE, index / BLOCK_EDGE) +     // Select subvector pixel
-                BLOCK_OFFSETS[PushC.FrameIdx % BLOCK_OFFSET_COUNT]; // Add Block Offset
+            ivec2 readTexel = calculateRenderTexel(WorkGroupID, index);
             readTexel = mirror2(readTexel, RenderSize); // Mirror if coordinate is out of screen bounds
 
             // Constant 1.f value
@@ -209,27 +224,22 @@ void main()
     { // Calculate min/max, normalize positions & positions squared features
         for(uint featureIdx = FEATURES_NOT_SCALED; featureIdx < FEATURES_COUNT; featureIdx++) 
         {
-            float tempMax = 0;
-            float tempMin = 0;
+            float value = imageLoad(TempData, calcSubvectorTexel(0, featureIdx)).r;
+            float tempMax = value;
+            float tempMin = value;
 
-            for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+            for (uint subIdx = 1; subIdx < SUBVECTOR_SIZE; subIdx++)
             {
                 float value = imageLoad(TempData, calcSubvectorTexel(subIdx, featureIdx)).r;
                 tempMax = max(tempMax, value);
                 tempMin = min(tempMin, value);
             }
 
-            Shared.SumVec[gl_LocalInvocationIndex] = tempMax;
-            fullBarrier();
-        
             // parallel reduction find max
-            PARALLEL_REDUCTION(max, Shared.BlockMax)
-
-            Shared.SumVec[gl_LocalInvocationIndex] = tempMin;
-            fullBarrier();
+            PARALLEL_REDUCTION(max, tempMax, Shared.BlockMax)
 
             // parallel reduction find min
-            PARALLEL_REDUCTION(min, Shared.BlockMin)
+            PARALLEL_REDUCTION(min, tempMin, Shared.BlockMin)
 
             float diff = Shared.BlockMax - Shared.BlockMin;
             diff = max(diff, 1.f);
@@ -281,10 +291,7 @@ void main()
                     tempSum += value * value;
                 }
             }            
-            Shared.SumVec[gl_LocalInvocationIndex] = tempSum;
-            fullBarrier();
-
-            PARALLEL_REDUCTION(add, Shared.VecLength);
+            PARALLEL_REDUCTION(add, tempSum, Shared.VecLength);
 
             float rValue = 0;
             if (gl_LocalInvocationIndex < limit)
@@ -319,6 +326,12 @@ void main()
                 {
                     Shared.RMat[gl_LocalInvocationIndex][featureIdx] = 0.f;
                 }
+                continue;
+            }
+
+            if (Shared.ULengthSquared < 0.001f)
+            {
+                continue;
             }
 
             for (uint featureIdx2 = featureIdx + 1; featureIdx2 < BUFFERS_COUNT; featureIdx2++)
@@ -336,10 +349,7 @@ void main()
                     }
                 }
 
-                Shared.SumVec[gl_LocalInvocationIndex] = tempSum;
-                fullBarrier();
-
-                PARALLEL_REDUCTION(add, Shared.DotV);
+                PARALLEL_REDUCTION(add, tempSum, Shared.DotV);
 
                 for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
                 {
@@ -419,10 +429,10 @@ void main()
     { // Calculate filtered color
         for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
         {
-            ivec2 texel = calcSubvectorTexel(subIdx, 0);
-            Shared.UVec[texel.x] = 0.f; // Reuse UVec for RChannel
-            Shared.GChannel[texel.x] = 0.f;
-            Shared.BChannel[texel.x] = 0.f;
+            int index = calcIndex(subIdx);
+            Shared.UVec[index] = 0.f; // Reuse UVec for RChannel
+            Shared.GChannel[index] = 0.f;
+            Shared.BChannel[index] = 0.f;
         }
 
         for (int featureIdx = 0; featureIdx < FEATURES_COUNT; featureIdx++)
@@ -434,16 +444,19 @@ void main()
                 Shared.UVec[texel.x] += Shared.RMat[featureIdx][FEATURES_COUNT] * temp;
                 Shared.GChannel[texel.x] += Shared.RMat[featureIdx][FEATURES_COUNT + 1] * temp;
                 Shared.BChannel[texel.x] += Shared.RMat[featureIdx][FEATURES_COUNT + 2] * temp;
+                if (isnan(Shared.UVec[texel.x]) || isnan(Shared.GChannel[texel.x]) || isnan(Shared.BChannel[texel.x]))
+                {
+                    Shared.UVec[texel.x] += 1.0;
+                    Shared.GChannel[texel.x] += 0.0;
+                    Shared.BChannel[texel.x] += 0.0;
+                }
             }
         }
 
         for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
         {
-            uint index = subIdx * WorkGroupIdx + gl_LocalInvocationIndex;
-            ivec2 writeTexel = 
-                ivec2(WorkGroupID * BLOCK_EDGE) +                   // Select fist pixel of current Block (Group ID * edge length)
-                ivec2(index % BLOCK_EDGE, index / BLOCK_EDGE) +     // Select subvector pixel
-                BLOCK_OFFSETS[PushC.FrameIdx % BLOCK_OFFSET_COUNT]; // Add Block Offset
+            uint index = calcIndex(subIdx);
+            ivec2 writeTexel = calculateRenderTexel(WorkGroupID, index);
 
             if (writeTexel.x < 0 || writeTexel.x >= RenderSize.x || writeTexel.y < 0 || writeTexel.y >= RenderSize.y)
             {
@@ -457,6 +470,17 @@ void main()
             color.b = max(Shared.BChannel[index], 0.f);
             color.rgb *= albedo;
             imageStore(Output, writeTexel, color);
+            if (PushC.DebugMode == DEBUG_REGRESSION_OUT)
+            {
+                imageStore(DebugOutput, writeTexel, color);
+            }
+            if (PushC.DebugMode == DEBUG_REGRESSION_BLOCKS)
+            {
+                vec2 color = vec2(index % BLOCK_EDGE, index / BLOCK_EDGE) / vec2(BLOCK_EDGE - 1);
+                color *= color;
+                color *= color;
+                imageStore(DebugOutput, writeTexel, vec4(color, 0, 1));
+            }
         }
     }
 }
