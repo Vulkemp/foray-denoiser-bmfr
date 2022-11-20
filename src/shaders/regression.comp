@@ -6,14 +6,14 @@
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(rgba16f, binding = 0) uniform readonly image2D GbufferPositions;
-layout(rgba16f, binding = 0) uniform readonly image2D GbufferNormals;
-layout(rgba16f, binding = 0) uniform readonly image2D GbufferAlbedo;
+layout(rgba16f, binding = 1) uniform readonly image2D GbufferNormals;
+layout(rgba16f, binding = 2) uniform readonly image2D GbufferAlbedo;
 
-layout(r16f, binding = 0) uniform coherent image2D TempData;
-layout(r16f, binding = 0) uniform image2D OutData;
+layout(r16f, binding = 3) uniform coherent image2D TempData;
+layout(r16f, binding = 4) uniform image2D OutData;
 
-layout(rgba16f, binding = 0) uniform image2DArray Input;
-layout(rgba16f, binding = 0) uniform image2DArray Output;
+layout(rgba16f, binding = 5) uniform image2DArray Input;
+layout(rgba16f, binding = 6) uniform image2D Output;
 
 // Features used for regression
 const uint FEATURES_COUNT = 10; // constant 1, 3x normal, 3x position, 3x position squared
@@ -73,7 +73,6 @@ layout (push_constant) uniform push_constant_t
     uint FrameIdx;
     uint DispatchWidth;
     uint ReadIdx;
-    uint WriteIdx;
 } PushC;
 
 int mirror(int idx, int size)
@@ -145,6 +144,10 @@ if(gl_LocalInvocationIndex == 0)  \
     outvar = operation(Shared.SumVec[0], Shared.SumVec[1]); \
 fullBarrier();
 
+float add(float a, float b)
+{
+    return a + b;
+}
 
 void main()
 {
@@ -263,12 +266,197 @@ void main()
 
         fullBarrier();
     }
+    int limit = 0;
     { // Householder QR decomposition
-        int limit = 0;
         for (uint featureIdx = 0; featureIdx < FEATURES_COUNT; featureIdx++)
         {
             float tempSum = 0;
-            
+            for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+            {
+                ivec2 texel = calcSubvectorTexel(subIdx, featureIdx);
+                float value = imageLoad(OutData, texel).r;
+                Shared.UVec[texel.x] = value;
+                if (texel.x >= limit + 1)
+                {
+                    tempSum += value * value;
+                }
+            }            
+            Shared.SumVec[gl_LocalInvocationIndex] = tempSum;
+            fullBarrier();
+
+            PARALLEL_REDUCTION(add, Shared.VecLength);
+
+            float rValue = 0;
+            if (gl_LocalInvocationIndex < limit)
+            {
+                rValue = Shared.UVec[gl_LocalInvocationIndex];
+            }
+            else if (gl_LocalInvocationIndex == limit)
+            {
+                Shared.ULengthSquared = Shared.VecLength;
+                Shared.VecLength = sqrt(Shared.VecLength + Shared.UVec[limit] * Shared.UVec[limit]);
+                Shared.UVec[limit] -= Shared.VecLength;
+                Shared.ULengthSquared += Shared.UVec[limit] * Shared.UVec[limit];
+                rValue = Shared.VecLength;
+            }
+            else // gl_LocalInvocationIndex > limit
+            {
+                rValue = 0;
+            }
+            fullBarrier();
+
+            if (Shared.VecLength > 0.01f)
+            {
+                limit++;
+                if (gl_LocalInvocationIndex < FEATURES_COUNT)
+                {
+                    Shared.RMat[gl_LocalInvocationIndex][featureIdx] = rValue;
+                }
+            }
+            else
+            {
+                if (gl_LocalInvocationIndex < FEATURES_COUNT)
+                {
+                    Shared.RMat[gl_LocalInvocationIndex][featureIdx] = 0.f;
+                }
+            }
+
+            for (uint featureIdx2 = featureIdx + 1; featureIdx2 < BUFFERS_COUNT; featureIdx2++)
+            {
+                float tempCache[SUBVECTOR_SIZE];
+                float tempSum = 0.f;
+                for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+                {
+                    ivec2 texel = calcSubvectorTexel(subIdx, featureIdx2);
+                    if (texel.x >= limit - 1)
+                    {
+                        float temp = imageLoad(OutData, texel).r;
+                        tempCache[subIdx] = temp;
+                        tempSum += temp * Shared.UVec[texel.x];
+                    }
+                }
+
+                Shared.SumVec[gl_LocalInvocationIndex] = tempSum;
+                fullBarrier();
+
+                PARALLEL_REDUCTION(add, Shared.DotV);
+
+                for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+                {
+                    ivec2 texel = calcSubvectorTexel(subIdx, featureIdx2);
+                    if (texel.x >= limit - 1)
+                    {
+                        float temp = tempCache[subIdx] - 2.f * Shared.UVec[texel.x] * Shared.DotV / Shared.ULengthSquared;
+                        imageStore(OutData, texel, vec4(temp));
+                    }
+                }
+                fullBarrier();
+            }
+        }
+    }
+    { // Build rMat
+        uint tempId = 0;
+        ivec2 texel = ivec2(0, gl_WorkGroupID.x * BUFFERS_COUNT + FEATURES_COUNT);
+
+        if (gl_LocalInvocationIndex < FEATURES_COUNT)
+        {
+            ivec2 texel = ivec2(int(gl_LocalInvocationIndex), gl_WorkGroupID.x * BUFFERS_COUNT + FEATURES_COUNT);
+            Shared.RMat[gl_LocalInvocationIndex][FEATURES_COUNT] = imageLoad(OutData, texel).r;
+        }
+        else
+        {
+            tempId = gl_LocalInvocationIndex - FEATURES_COUNT;
+            if (tempId < FEATURES_COUNT)
+            {
+                ivec2 texel = ivec2(int(tempId), gl_WorkGroupID.x * BUFFERS_COUNT + BUFFERS_COUNT - 2);
+                Shared.RMat[tempId][BUFFERS_COUNT - 2] = imageLoad(OutData, texel).r;
+            }
+            else
+            {
+                tempId = tempId - FEATURES_COUNT;
+                if (tempId < FEATURES_COUNT)
+                {
+                    ivec2 texel = ivec2(int(tempId), gl_WorkGroupID.x * BUFFERS_COUNT + BUFFERS_COUNT - 1);
+                    Shared.RMat[tempId][BUFFERS_COUNT - 1] = imageLoad(OutData, texel).r;
+                }
+            }
+        }
+
+        fullBarrier();
+    }
+    { // Back Substitution
+        limit--;
+        for (int idx = int(BUFFERS_COUNT - 4); idx >= 0; idx--)
+        {
+            uint column = BUFFERS_COUNT - gl_LocalInvocationIndex -1;
+            if (Shared.RMat[limit][idx] != 0.f)
+            {
+                if (gl_LocalInvocationIndex < 3U)
+                {
+                    float value0 = Shared.RMat[limit][column];
+                    float value1 = Shared.RMat[limit][idx];
+                    Shared.RMat[idx][column] = value0 / value1;
+                }
+                limit--;
+            }
+            else
+            {
+                if (gl_LocalInvocationIndex < 3)
+                {
+                    Shared.RMat[idx][column] = 0.f;
+                }
+            }
+            fullBarrier();
+            if (gl_LocalInvocationIndex < 3 * limit + 3)
+            {
+                uint row = limit - gl_LocalInvocationIndex / 3;
+                uint column = BUFFERS_COUNT - (gl_LocalInvocationIndex % 3) - 1;
+                Shared.RMat[row][column] -= Shared.RMat[idx][column] * Shared.RMat[row][idx];
+            }
+            fullBarrier();
+        }
+    }
+    { // Calculate filtered color
+        for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+        {
+            ivec2 texel = calcSubvectorTexel(subIdx, 0);
+            Shared.UVec[texel.x] = 0.f; // Reuse UVec for RChannel
+            Shared.GChannel[texel.x] = 0.f;
+            Shared.BChannel[texel.x] = 0.f;
+        }
+
+        for (int featureIdx = 0; featureIdx < FEATURES_COUNT; featureIdx++)
+        {
+            for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+            {
+                ivec2 texel = calcSubvectorTexel(subIdx, featureIdx);
+                float temp = imageLoad(TempData, texel).r;
+                Shared.UVec[texel.x] += Shared.RMat[featureIdx][FEATURES_COUNT] * temp;
+                Shared.GChannel[texel.x] += Shared.RMat[featureIdx][FEATURES_COUNT + 1] * temp;
+                Shared.BChannel[texel.x] += Shared.RMat[featureIdx][FEATURES_COUNT + 2] * temp;
+            }
+        }
+
+        for (uint subIdx = 0; subIdx < SUBVECTOR_SIZE; subIdx++)
+        {
+            uint index = subIdx * WorkGroupIdx + gl_LocalInvocationIndex;
+            ivec2 writeTexel = 
+                ivec2(WorkGroupID * BLOCK_EDGE) +                   // Select fist pixel of current Block (Group ID * edge length)
+                ivec2(index % BLOCK_EDGE, index / BLOCK_EDGE) +     // Select subvector pixel
+                BLOCK_OFFSETS[PushC.FrameIdx % BLOCK_OFFSET_COUNT]; // Add Block Offset
+
+            if (writeTexel.x < 0 || writeTexel.x >= RenderSize.x || writeTexel.y < 0 || writeTexel.y >= RenderSize.y)
+            {
+                continue;
+            }
+
+            vec4 color = imageLoad(Input, ivec3(writeTexel, PushC.ReadIdx));
+            vec3 albedo = imageLoad(GbufferAlbedo, writeTexel).rgb;
+            color.r = max(Shared.UVec[index], 0.f);
+            color.g = max(Shared.GChannel[index], 0.f);
+            color.b = max(Shared.BChannel[index], 0.f);
+            color.rgb *= albedo;
+            imageStore(Output, writeTexel, color);
         }
     }
 }

@@ -13,6 +13,8 @@ namespace foray::bmfr {
         Assert(!!mInputs.Motion);
         mInputs.Position = config.GBufferOutputs[(size_t)stages::GBufferStage::EOutput::Position];
         Assert(!!mInputs.Position);
+        mInputs.Albedo = config.GBufferOutputs[(size_t)stages::GBufferStage::EOutput::Albedo];
+        Assert(!!mInputs.Albedo);
         mInputs.Primary = config.PrimaryInput;
         Assert(!!mInputs.Primary);
         mPrimaryOutput = config.PrimaryOutput;
@@ -48,13 +50,27 @@ namespace foray::bmfr {
         {  // Setup temporary filtered image working target
             VkImageUsageFlags usage = VkImageUsageFlagBits::VK_IMAGE_USAGE_STORAGE_BIT;
             {  // Input
-                core::ManagedImage::CreateInfo ci(usage, VkFormat::VK_FORMAT_R16G16B16A16_SFLOAT, size, "Bmfr.RegressionTmp");
+                core::ManagedImage::CreateInfo ci(usage, VkFormat::VK_FORMAT_R16G16B16A16_SFLOAT, size, "Bmfr.Regression.Out");
                 mFilterImage.Create(mContext, ci);
+            }
+        }
+        {  // Setup regression
+            glm::uvec2 dispatch      = CalculateDispatchSize(size);
+            mRegression.DispatchSize = dispatch;
+            VkExtent2D regressionImageSize{BLOCK_EDGE * BLOCK_EDGE, dispatch.x * dispatch.y * 13};
+            {  // TempData
+                core::ManagedImage::CreateInfo ci(VkImageUsageFlagBits::VK_IMAGE_USAGE_STORAGE_BIT, VkFormat::VK_FORMAT_R16_SFLOAT, regressionImageSize,
+                                                  "Bmfr.Regression.TempData");
+                mRegression.TempData.Create(mContext, ci);
+            }
+            {  // OutData
+                core::ManagedImage::CreateInfo ci(VkImageUsageFlagBits::VK_IMAGE_USAGE_STORAGE_BIT, VkFormat::VK_FORMAT_R16_SFLOAT, regressionImageSize, "Bmfr.Regression.OutData");
+                mRegression.OutData.Create(mContext, ci);
             }
         }
 
         mPreProcessStage.Init(this);
-        // mRegressionStage.Init(this);
+        mRegressionStage.Init(this);
         mPostProcessStage.Init(this);
 
         mBenchmark = config.Benchmark;
@@ -67,6 +83,13 @@ namespace foray::bmfr {
 
         mInitialized = true;
     }
+
+    glm::uvec2 BmfrDenoiser::CalculateDispatchSize(const VkExtent2D& renderSize)
+    {
+        glm::uvec2 size((renderSize.width + BLOCK_EDGE - 1) / BLOCK_EDGE, (renderSize.height + BLOCK_EDGE - 1) / BLOCK_EDGE);
+        return size + glm::uvec2(1);
+    }
+
     std::string BmfrDenoiser::GetUILabel()
     {
         return "BMFR Denoiser";
@@ -116,7 +139,7 @@ namespace foray::bmfr {
         {
             mBenchmark->CmdWriteTimestamp(cmdBuffer, frameIdx, TIMESTAMP_PreProcess, compute);
         }
-        // mRegressionStage.RecordFrame(cmdBuffer, renderInfo);
+        mRegressionStage.RecordFrame(cmdBuffer, renderInfo);
         if(!!mBenchmark)
         {
             mBenchmark->CmdWriteTimestamp(cmdBuffer, frameIdx, TIMESTAMP_Regression, compute);
@@ -138,12 +161,12 @@ namespace foray::bmfr {
     void BmfrDenoiser::OnShadersRecompiled()
     {
         mPreProcessStage.OnShadersRecompiled();
-        // mRegressionStage.OnShadersRecompiled();
+        mRegressionStage.OnShadersRecompiled();
         mPostProcessStage.OnShadersRecompiled();
     }
     void BmfrDenoiser::Resize(const VkExtent2D& size)
     {
-        if (!mInitialized)
+        if(!mInitialized)
         {
             return;
         }
@@ -159,19 +182,28 @@ namespace foray::bmfr {
             image->Resize(size);
         }
 
+        {  // Setup regression
+            glm::uvec2 dispatch      = CalculateDispatchSize(size);
+            mRegression.DispatchSize = dispatch;
+            VkExtent2D regressionImageSize{BLOCK_EDGE * BLOCK_EDGE, dispatch.x * dispatch.y * 13};
+            mRegression.TempData.Resize(regressionImageSize);
+            mRegression.OutData.Resize(regressionImageSize);
+        }
+
+
         mPreProcessStage.UpdateDescriptorSet();
-        // mRegressionStage.UpdateDescriptorSet();
+        mRegressionStage.UpdateDescriptorSet();
         mPostProcessStage.UpdateDescriptorSet();
         IgnoreHistoryNextFrame();
     }
     void BmfrDenoiser::Destroy()
-    {   
+    {
         mInitialized = false;
 
         mPostProcessStage.Destroy();
-        // mRegressionStage.Destroy();
+        mRegressionStage.Destroy();
         mPreProcessStage.Destroy();
-        std::vector<core::ManagedImage*> images({&mAccuImages.Input, &mAccuImages.Filtered, &mAccuImages.AcceptBools, &mFilterImage});
+        std::vector<core::ManagedImage*> images({&mAccuImages.Input, &mAccuImages.Filtered, &mAccuImages.AcceptBools, &mFilterImage, &mRegression.TempData, &mRegression.OutData});
         for(core::ManagedImage* image : images)
         {
             image->Destroy();

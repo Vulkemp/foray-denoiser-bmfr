@@ -16,8 +16,10 @@ namespace foray::bmfr {
 
         struct PushConstant
         {
-            /* some data */
-        };
+            uint FrameIdx;
+            uint DispatchWidth;
+            uint ReadIdx;
+        } mPushC;
 
         virtual void ApiInitShader() override;
         virtual void ApiCreateDescriptorSet() override;

@@ -19,6 +19,8 @@ namespace foray::bmfr {
         friend PostProcessStage;
 
       public:
+        inline static const uint32_t BLOCK_EDGE = 32;
+
         virtual void        Init(core::Context* context, const stages::DenoiserConfig& config) override;
         virtual void        RecordFrame(VkCommandBuffer cmdBuffer, base::FrameRenderInfo& renderInfo) override;
         virtual std::string GetUILabel() override;
@@ -32,11 +34,14 @@ namespace foray::bmfr {
         virtual void Destroy() override;
 
       protected:
+        glm::uvec2 CalculateDispatchSize(const VkExtent2D& renderSize);
+
         struct
         {
             core::ManagedImage* Primary  = nullptr;
             core::ManagedImage* Position = nullptr;
             core::ManagedImage* Normal   = nullptr;
+            core::ManagedImage* Albedo   = nullptr;
             core::ManagedImage* Motion   = nullptr;
         } mInputs;
 
@@ -59,6 +64,12 @@ namespace foray::bmfr {
             util::HistoryImage Normal;
             bool               Valid = false;
         } mHistory;
+
+        struct {
+            core::ManagedImage TempData;
+            core::ManagedImage OutData;
+            glm::uvec2 DispatchSize;
+        } mRegression;
 
         uint32_t mDebugMode = DEBUG_NONE;
 
