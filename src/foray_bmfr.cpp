@@ -81,6 +81,7 @@ namespace foray::bmfr {
             mBenchmark->Create(mContext, queryNames);
         }
 
+        mHistory.Valid = false;
         mInitialized = true;
     }
 
