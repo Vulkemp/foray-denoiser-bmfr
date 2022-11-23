@@ -68,29 +68,15 @@ namespace foray::bmfr {
             }
         }
         {
-            VkImageLayout                    oldLayout = renderInfo.GetImageLayoutCache().Get(mBmfrStage->mAccuImages.Input);
-            uint32_t                         readIdx   = renderInfo.GetFrameNumber() % 2;
-            uint32_t                         writeIdx  = (renderInfo.GetFrameNumber() + 1) % 2;
-            core::ImageLayoutCache::Barrier2 readBarrier{
+            core::ImageLayoutCache::Barrier2 barrier{
                 .SrcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .SrcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+                .SrcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
                 .DstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                .DstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+                .DstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
                 .NewLayout     = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL,
                 .SubresourceRange =
-                    VkImageSubresourceRange{.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1U, .baseArrayLayer = readIdx, .layerCount = 1U}};
-            vkBarriers.push_back(renderInfo.GetImageLayoutCache().MakeBarrier(mBmfrStage->mAccuImages.Input, readBarrier));
-            core::ImageLayoutCache::Barrier2 writeBarrier{
-                .SrcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .SrcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
-                .DstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                .DstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
-                .NewLayout     = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL,
-                .SubresourceRange =
-                    VkImageSubresourceRange{.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1U, .baseArrayLayer = writeIdx, .layerCount = 1U}};
-            auto vkBarrier      = renderInfo.GetImageLayoutCache().MakeBarrier(mBmfrStage->mAccuImages.Input, writeBarrier);
-            vkBarrier.oldLayout = oldLayout;
-            vkBarriers.push_back(vkBarrier);
+                    VkImageSubresourceRange{.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1U, .baseArrayLayer = 0, .layerCount = 2U}};
+            vkBarriers.push_back(renderInfo.GetImageLayoutCache().MakeBarrier(mBmfrStage->mAccuImages.Input, barrier));
         }
         {
             core::ImageLayoutCache::Barrier2 barrier{.SrcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,

@@ -444,12 +444,6 @@ void main()
                 Shared.UVec[texel.x] += Shared.RMat[featureIdx][FEATURES_COUNT] * temp;
                 Shared.GChannel[texel.x] += Shared.RMat[featureIdx][FEATURES_COUNT + 1] * temp;
                 Shared.BChannel[texel.x] += Shared.RMat[featureIdx][FEATURES_COUNT + 2] * temp;
-                if (isnan(Shared.UVec[texel.x]) || isnan(Shared.GChannel[texel.x]) || isnan(Shared.BChannel[texel.x]))
-                {
-                    Shared.UVec[texel.x] += 1.0;
-                    Shared.GChannel[texel.x] += 0.0;
-                    Shared.BChannel[texel.x] += 0.0;
-                }
             }
         }
 

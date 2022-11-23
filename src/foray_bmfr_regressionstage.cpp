@@ -85,7 +85,7 @@ namespace foray::bmfr {
                 .DstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
                 .NewLayout     = VkImageLayout::VK_IMAGE_LAYOUT_GENERAL,
                 .SubresourceRange =
-                    VkImageSubresourceRange{.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1U, .baseArrayLayer = readIdx, .layerCount = 1U}};
+                    VkImageSubresourceRange{.aspectMask = VkImageAspectFlagBits::VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1U, .baseArrayLayer = 0U, .layerCount = 2U}};
             vkBarriers.push_back(renderInfo.GetImageLayoutCache().MakeBarrier(mBmfrStage->mAccuImages.Input, barrier));
         }
         {  // PostProcess Filtered Output
