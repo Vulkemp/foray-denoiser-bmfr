@@ -26,7 +26,7 @@ layout(rgba16f, binding = 2) uniform readonly image2D GbufferAlbedo;
 //  (block features * workgroup count)
 
 layout(r16f, binding = 3) uniform coherent image2D TempData;
-layout(r16f, binding = 4) uniform image2D OutData;
+layout(r16f, binding = 4) uniform coherent image2D OutData;
 
 layout(rgba16f, binding = 5) uniform readonly image2DArray Input;
 layout(rgba16f, binding = 6) uniform writeonly image2D Output;
