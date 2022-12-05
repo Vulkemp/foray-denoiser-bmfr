@@ -26,7 +26,7 @@ namespace foray::bmfr {
         virtual std::string GetUILabel() override;
         virtual void        DisplayImguiConfiguration() override;
         virtual void        IgnoreHistoryNextFrame() override;
-        virtual void        OnShadersRecompiled() override;
+        virtual void        OnShadersRecompiled(const std::unordered_set<uint64_t>& recompiled) override;
 
 
         virtual void Resize(const VkExtent2D& size) override;

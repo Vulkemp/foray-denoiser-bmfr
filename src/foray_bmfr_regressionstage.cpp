@@ -29,8 +29,7 @@ namespace foray::bmfr {
     }
     void RegressionStage::ApiInitShader()
     {
-        mShader.LoadFromSource(mContext, BMFR_SHADER_DIR "/regression.comp");
-        mShaderSourcePaths.push_back(BMFR_SHADER_DIR "/regression.comp");
+        mShaderKeys.push_back(mShader.CompileFromSource(mContext, BMFR_SHADER_DIR "/regression.comp"));
     }
     void RegressionStage::ApiCreateDescriptorSet()
     {

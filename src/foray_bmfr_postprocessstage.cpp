@@ -11,8 +11,7 @@ namespace foray::bmfr {
 
     void PostProcessStage::ApiInitShader()
     {
-        mShader.LoadFromSource(mContext, BMFR_SHADER_DIR "/postprocess.comp");
-        mShaderSourcePaths.push_back(BMFR_SHADER_DIR "/postprocess.comp");
+        mShaderKeys.push_back(mShader.CompileFromSource(mContext, BMFR_SHADER_DIR "/postprocess.comp"));
     }
     void PostProcessStage::ApiCreateDescriptorSet()
     {

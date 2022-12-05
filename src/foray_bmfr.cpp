@@ -206,11 +206,11 @@ namespace foray::bmfr {
             mBenchmark->CmdWriteTimestamp(cmdBuffer, frameIdx, bench::BenchmarkTimestamp::END, VkPipelineStageFlagBits::VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
         }
     }
-    void BmfrDenoiser::OnShadersRecompiled()
+    void BmfrDenoiser::OnShadersRecompiled(const std::unordered_set<uint64_t>& recompiled)
     {
-        mPreProcessStage.OnShadersRecompiled();
-        mRegressionStage.OnShadersRecompiled();
-        mPostProcessStage.OnShadersRecompiled();
+        mPreProcessStage.OnShadersRecompiled(recompiled);
+        mRegressionStage.OnShadersRecompiled(recompiled);
+        mPostProcessStage.OnShadersRecompiled(recompiled);
     }
     void BmfrDenoiser::Resize(const VkExtent2D& size)
     {
