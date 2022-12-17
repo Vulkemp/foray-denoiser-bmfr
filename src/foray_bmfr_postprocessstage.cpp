@@ -6,7 +6,7 @@ namespace foray::bmfr {
     {
         Destroy();
         mBmfrStage = bmfrStage;
-        stages::ComputeStage::Init(mBmfrStage->mContext);
+        stages::ComputeStageBase::Init(mBmfrStage->mContext);
     }
 
     void PostProcessStage::ApiInitShader()

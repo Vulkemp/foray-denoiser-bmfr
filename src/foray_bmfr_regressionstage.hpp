@@ -5,7 +5,7 @@
 namespace foray::bmfr {
     class BmfrDenoiser;
 
-    class RegressionStage : public stages::ComputeStage
+    class RegressionStage : public stages::ComputeStageBase
     {
       public:
         void Init(BmfrDenoiser* bmfrStage);

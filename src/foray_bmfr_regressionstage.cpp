@@ -5,7 +5,7 @@ namespace foray::bmfr {
     void RegressionStage::Init(BmfrDenoiser* bmfrStage)
     {
         mBmfrStage = bmfrStage;
-        stages::ComputeStage::Init(mBmfrStage->mContext);
+        stages::ComputeStageBase::Init(mBmfrStage->mContext);
     }
     void RegressionStage::UpdateDescriptorSet()
     {

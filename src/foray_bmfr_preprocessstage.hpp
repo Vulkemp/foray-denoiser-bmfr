@@ -5,7 +5,7 @@
 namespace foray::bmfr {
     class BmfrDenoiser;
 
-    class PreProcessStage : public foray::stages::ComputeStage
+    class PreProcessStage : public foray::stages::ComputeStageBase
     {
         friend BmfrDenoiser;
       public:
